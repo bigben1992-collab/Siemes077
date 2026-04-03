@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Lager-Finder Pro (Manuell & Scan)</title>
+    <title>Lager-Finder Pro</title>
     <script src="https://unpkg.com/html5-qrcode"></script>
     <style>
         body { font-family: sans-serif; display: flex; flex-direction: column; align-items: center; background-color: #f4f4f9; margin: 0; padding: 15px; }
@@ -12,43 +12,45 @@
         #instruction { font-weight: bold; color: #d63384; margin-bottom: 15px; text-align: center; }
         
         .data-row { display: flex; flex-direction: column; margin-bottom: 12px; border-bottom: 1px solid #eee; padding-bottom: 8px; }
-        .label-group { display: flex; justify-content: space-between; align-items: center; margin-bottom: 5px; }
-        .data-label { color: #666; font-size: 14px; }
+        input[type="text"] { width: 100%; padding: 10px; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box; font-weight: bold; font-size: 16px; }
         
-        input[type="text"] { width: 100%; padding: 8px; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box; font-weight: bold; font-size: 16px; }
-        input:focus { border-color: #007bff; outline: none; background-color: #fffdec; }
+        /* Liste für Platz-Inhalt */
+        #platz-liste { margin-top: 15px; padding: 10px; background: #e9ecef; border-radius: 8px; display: none; width: 100%; box-sizing: border-box; }
+        .liste-titel { font-weight: bold; font-size: 14px; margin-bottom: 5px; border-bottom: 1px solid #ccc; }
+        .liste-item { font-size: 13px; display: flex; justify-content: space-between; padding: 3px 0; }
 
         .status-val { font-weight: bold; color: #007bff; }
         #action-buttons { display: none; gap: 10px; margin-top: 20px; width: 100%; max-width: 500px; }
         button { flex: 1; padding: 15px; font-size: 16px; font-weight: bold; border: none; border-radius: 8px; cursor: pointer; color: white; }
         .btn-einlagern { background-color: #28a745; }
         .btn-auslagern { background-color: #dc3545; }
-        .btn-manual { background: #6c757d; padding: 5px 10px; font-size: 12px; margin-left: 10px; }
+        .scan-lock { opacity: 0.5; pointer-events: none; }
     </style>
 </head>
 <body>
 
     <div id="reader"></div>
 
-    <div class="info-box">
-        <div id="instruction">SCHRITT 1: Ware scannen oder eingeben</div>
+    <div class="info-box" id="main-box">
+        <div id="instruction">SCHRITT 1: Artikel scannen</div>
         
         <div class="data-row">
-            <div class="label-group">
-                <span class="data-label">Ware (ISBN / Code):</span>
-            </div>
-            <input type="text" id="input-ware" placeholder="Scan oder manuelle Eingabe..." onchange="manualWareUpdate()">
+            <span class="data-label">Artikelnummer:</span>
+            <input type="text" id="input-ware" placeholder="Scan oder Eingabe..." onchange="manualWareUpdate()">
         </div>
 
         <div class="data-row">
-            <div class="label-group">
-                <span class="data-label">Lagerplatz (Bestätigung):</span>
-            </div>
-            <input type="text" id="input-platz" placeholder="Scan oder manuelle Eingabe..." onchange="manualPlatzUpdate()">
+            <span class="data-label">Lagerplatz:</span>
+            <input type="text" id="input-platz" placeholder="Scan oder Eingabe..." onchange="manualPlatzUpdate()">
+        </div>
+
+        <div id="platz-liste">
+            <div class="liste-titel">Inhalt auf diesem Platz:</div>
+            <div id="liste-content"></div>
         </div>
 
         <div style="display: flex; justify-content: space-between; margin-top: 10px; font-size: 15px;">
-            <span>Empfohlen: <span id="val-info-platz" class="status-val">---</span></span>
+            <span>Empf. Platz: <span id="val-info-platz" class="status-val">---</span></span>
             <span>Bestand: <span id="val-bestand" class="status-val">---</span></span>
         </div>
     </div>
@@ -61,39 +63,45 @@
     <script>
         let ware = "";
         let lagerplatz = "";
+        let isScanning = false; // 2-Sekunden Sperre
         
-        // --- DEINE URL HIER EINTRAGEN ---
-        const webAppUrl = "https://script.google.com/macros/s/AKfycbydLgiHHIjqv5P8qtUEGuvzpX9ZbZRspecZX-mFTL_nFSm4nBfigdFbHUvnnpH7Ss2udA/exec";
+        const webAppUrl = "https://script.google.com/macros/s/AKfycbzP7rOaxfDdff7OPOO1NKr4VRicArQ98VtT7FSCmazuSZl62s5vpa4SWwBcWClrDFC-/exec";
 
         const html5QrCode = new Html5Qrcode("reader");
         const config = { fps: 10, qrbox: { width: 250, height: 250 } };
 
-        // Scanner-Logik
         function onScanSuccess(decodedText) {
+            if (isScanning) return; // Abbruch wenn gesperrt
+            
+            isScanning = true;
+            document.body.classList.add('scan-lock');
+
             if (!ware) {
                 document.getElementById('input-ware').value = decodedText;
                 manualWareUpdate();
-            } else if (!lagerplatz) {
+            } else {
                 document.getElementById('input-platz').value = decodedText;
                 manualPlatzUpdate();
             }
+
+            // 2 Sekunden Verzögerung
+            setTimeout(() => {
+                isScanning = false;
+                document.body.classList.remove('scan-lock');
+            }, 2000);
         }
 
-        // Manuelle Änderung der Ware
         async function manualWareUpdate() {
             ware = document.getElementById('input-ware').value.trim();
             if (!ware) return;
 
-            document.getElementById('instruction').innerText = "Suche Infos...";
+            document.getElementById('instruction').innerText = "Suche Artikel-Infos...";
             try {
                 const response = await fetch(`${webAppUrl}?action=getInfo&ware=${encodeURIComponent(ware)}`);
                 const data = await response.json();
-                
                 document.getElementById('val-info-platz').innerText = data.platz;
                 document.getElementById('val-bestand').innerText = data.bestand;
-                
-                document.getElementById('instruction').innerText = "SCHRITT 2: Platz bestätigen";
-                document.getElementById('instruction').style.color = "#007bff";
+                document.getElementById('instruction').innerText = "SCHRITT 2: Platz scannen";
                 if(navigator.vibrate) navigator.vibrate(50);
             } catch (err) {
                 document.getElementById('val-info-platz').innerText = "Neu";
@@ -101,13 +109,32 @@
             }
         }
 
-        // Manuelle Änderung des Platzes
-        function manualPlatzUpdate() {
+        async function manualPlatzUpdate() {
             lagerplatz = document.getElementById('input-platz').value.trim();
-            if (ware && lagerplatz) {
+            if (!lagerplatz) return;
+
+            // Hole Liste der Artikel auf diesem Platz
+            try {
+                const response = await fetch(`${webAppUrl}?action=getPlatzInfo&platz=${encodeURIComponent(lagerplatz)}`);
+                const data = await response.json();
+                
+                const listDiv = document.getElementById('liste-content');
+                listDiv.innerHTML = "";
+                
+                if (data.artikel && data.artikel.length > 0) {
+                    data.artikel.forEach(item => {
+                        listDiv.innerHTML += `<div class="liste-item"><span>${item.name}</span><b>${item.menge}x</b></div>`;
+                    });
+                    document.getElementById('platz-liste').style.display = "block";
+                } else {
+                    listDiv.innerHTML = "Platz ist leer";
+                    document.getElementById('platz-liste').style.display = "block";
+                }
+            } catch (e) { console.log("Fehler bei Platz-Info"); }
+
+            if (ware) {
                 document.getElementById('action-buttons').style.display = "flex";
                 document.getElementById('instruction').innerText = "Bereit zum Buchen";
-                document.getElementById('instruction').style.color = "#28a745";
                 if(navigator.vibrate) navigator.vibrate(50);
             }
         }
@@ -124,14 +151,13 @@
         }
 
         function resetScanner() {
-            ware = "";
-            lagerplatz = "";
+            ware = ""; lagerplatz = "";
             document.getElementById('input-ware').value = "";
             document.getElementById('input-platz').value = "";
             document.getElementById('val-info-platz').innerText = "---";
             document.getElementById('val-bestand').innerText = "---";
-            document.getElementById('instruction').innerText = "SCHRITT 1: Ware scannen";
-            document.getElementById('instruction').style.color = "#d63384";
+            document.getElementById('platz-liste').style.display = "none";
+            document.getElementById('instruction').innerText = "SCHRITT 1: Artikel scannen";
             document.getElementById('action-buttons').style.display = "none";
         }
 
