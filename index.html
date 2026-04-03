@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Lager-Finder Pro (Manuell & Scan)</title>
+    <script src="https://unpkg.com/html5-qrcode"></script>
+    <style>
+        body { font-family: sans-serif; display: flex; flex-direction: column; align-items: center; background-color: #f4f4f9; margin: 0; padding: 15px; }
+        #reader { width: 100%; max-width: 500px; border-radius: 10px; overflow: hidden; box-shadow: 0 4px 10px rgba(0,0,0,0.1); }
+        .info-box { background: white; padding: 20px; border-radius: 10px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); margin-top: 15px; width: 100%; max-width: 460px; }
+        #instruction { font-weight: bold; color: #d63384; margin-bottom: 15px; text-align: center; }
+        
+        .data-row { display: flex; flex-direction: column; margin-bottom: 12px; border-bottom: 1px solid #eee; padding-bottom: 8px; }
+        .label-group { display: flex; justify-content: space-between; align-items: center; margin-bottom: 5px; }
+        .data-label { color: #666; font-size: 14px; }
+        
+        input[type="text"] { width: 100%; padding: 8px; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box; font-weight: bold; font-size: 16px; }
+        input:focus { border-color: #007bff; outline: none; background-color: #fffdec; }
+
+        .status-val { font-weight: bold; color: #007bff; }
+        #action-buttons { display: none; gap: 10px; margin-top: 20px; width: 100%; max-width: 500px; }
+        button { flex: 1; padding: 15px; font-size: 16px; font-weight: bold; border: none; border-radius: 8px; cursor: pointer; color: white; }
+        .btn-einlagern { background-color: #28a745; }
+        .btn-auslagern { background-color: #dc3545; }
+        .btn-manual { background: #6c757d; padding: 5px 10px; font-size: 12px; margin-left: 10px; }
+    </style>
+</head>
+<body>
+
+    <div id="reader"></div>
+
+    <div class="info-box">
+        <div id="instruction">SCHRITT 1: Ware scannen oder eingeben</div>
+        
+        <div class="data-row">
+            <div class="label-group">
+                <span class="data-label">Ware (ISBN / Code):</span>
+            </div>
+            <input type="text" id="input-ware" placeholder="Scan oder manuelle Eingabe..." onchange="manualWareUpdate()">
+        </div>
+
+        <div class="data-row">
+            <div class="label-group">
+                <span class="data-label">Lagerplatz (Bestätigung):</span>
+            </div>
+            <input type="text" id="input-platz" placeholder="Scan oder manuelle Eingabe..." onchange="manualPlatzUpdate()">
+        </div>
+
+        <div style="display: flex; justify-content: space-between; margin-top: 10px; font-size: 15px;">
+            <span>Empfohlen: <span id="val-info-platz" class="status-val">---</span></span>
+            <span>Bestand: <span id="val-bestand" class="status-val">---</span></span>
+        </div>
+    </div>
+
+    <div id="action-buttons">
+        <button class="btn-einlagern" onclick="sendToSheet('EINLAGERN')">EINLAGERN</button>
+        <button class="btn-auslagern" onclick="sendToSheet('AUSLAGERN')">AUSLAGERN</button>
+    </div>
+
+    <script>
+        let ware = "";
+        let lagerplatz = "";
+        
+        // --- DEINE URL HIER EINTRAGEN ---
+        const webAppUrl = "https://script.google.com/macros/s/AKfycbydLgiHHIjqv5P8qtUEGuvzpX9ZbZRspecZX-mFTL_nFSm4nBfigdFbHUvnnpH7Ss2udA/exec";
+
+        const html5QrCode = new Html5Qrcode("reader");
+        const config = { fps: 10, qrbox: { width: 250, height: 250 } };
+
+        // Scanner-Logik
+        function onScanSuccess(decodedText) {
+            if (!ware) {
+                document.getElementById('input-ware').value = decodedText;
+                manualWareUpdate();
+            } else if (!lagerplatz) {
+                document.getElementById('input-platz').value = decodedText;
+                manualPlatzUpdate();
+            }
+        }
+
+        // Manuelle Änderung der Ware
+        async function manualWareUpdate() {
+            ware = document.getElementById('input-ware').value.trim();
+            if (!ware) return;
+
+            document.getElementById('instruction').innerText = "Suche Infos...";
+            try {
+                const response = await fetch(`${webAppUrl}?action=getInfo&ware=${encodeURIComponent(ware)}`);
+                const data = await response.json();
+                
+                document.getElementById('val-info-platz').innerText = data.platz;
+                document.getElementById('val-bestand').innerText = data.bestand;
+                
+                document.getElementById('instruction').innerText = "SCHRITT 2: Platz bestätigen";
+                document.getElementById('instruction').style.color = "#007bff";
+                if(navigator.vibrate) navigator.vibrate(50);
+            } catch (err) {
+                document.getElementById('val-info-platz').innerText = "Neu";
+                document.getElementById('val-bestand').innerText = "0";
+            }
+        }
+
+        // Manuelle Änderung des Platzes
+        function manualPlatzUpdate() {
+            lagerplatz = document.getElementById('input-platz').value.trim();
+            if (ware && lagerplatz) {
+                document.getElementById('action-buttons').style.display = "flex";
+                document.getElementById('instruction').innerText = "Bereit zum Buchen";
+                document.getElementById('instruction').style.color = "#28a745";
+                if(navigator.vibrate) navigator.vibrate(50);
+            }
+        }
+
+        function sendToSheet(typ) {
+            const params = `?platz=${encodeURIComponent(lagerplatz)}&ware=${encodeURIComponent(ware)}&typ=${typ}`;
+            document.getElementById('instruction').innerText = "Übertragung...";
+            
+            fetch(webAppUrl + params, { mode: 'no-cors' })
+                .then(() => {
+                    alert(`${typ} erfolgreich!`);
+                    resetScanner();
+                });
+        }
+
+        function resetScanner() {
+            ware = "";
+            lagerplatz = "";
+            document.getElementById('input-ware').value = "";
+            document.getElementById('input-platz').value = "";
+            document.getElementById('val-info-platz').innerText = "---";
+            document.getElementById('val-bestand').innerText = "---";
+            document.getElementById('instruction').innerText = "SCHRITT 1: Ware scannen";
+            document.getElementById('instruction').style.color = "#d63384";
+            document.getElementById('action-buttons').style.display = "none";
+        }
+
+        html5QrCode.start({ facingMode: "environment" }, config, onScanSuccess);
+    </script>
+</body>
+</html>
