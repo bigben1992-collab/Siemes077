@@ -9,22 +9,28 @@
         body { font-family: sans-serif; display: flex; flex-direction: column; align-items: center; background-color: #f4f4f9; margin: 0; padding: 15px; }
         #reader { width: 100%; max-width: 500px; border-radius: 10px; overflow: hidden; box-shadow: 0 4px 10px rgba(0,0,0,0.1); }
         .info-box { background: white; padding: 20px; border-radius: 10px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); margin-top: 15px; width: 100%; max-width: 460px; }
-        #instruction { font-weight: bold; color: #d63384; margin-bottom: 15px; text-align: center; }
+        #instruction { font-weight: bold; color: #d63384; margin-bottom: 15px; text-align: center; min-height: 1.2em; }
         h2 { font-size: 18px; color: #333; margin-top: 0; }
-        
+       
         .data-row { display: flex; flex-direction: column; margin-bottom: 12px; border-bottom: 1px solid #eee; padding-bottom: 8px; }
-        input[type="text"] { width: 100%; padding: 10px; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box; font-weight: bold; font-size: 16px; }
+        .data-label { font-size: 12px; color: #666; margin-bottom: 4px; }
+        input[type="text"] { width: 100%; padding: 10px; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box; font-weight: bold; font-size: 16px; background: #fff; }
         
+        /* Highlight für Bezeichnung */
+        #val-artikel-name { color: #555; font-style: italic; font-size: 14px; margin-top: 4px; display: block; }
+       
         #platz-liste { margin-top: 15px; padding: 10px; background: #eef2f7; border-radius: 8px; display: none; width: 100%; box-sizing: border-box; border-left: 4px solid #007bff; }
         .liste-titel { font-weight: bold; font-size: 14px; margin-bottom: 5px; color: #007bff; }
         .liste-item { font-size: 13px; display: flex; justify-content: space-between; padding: 4px 0; border-bottom: 1px dotted #ccc; }
 
         .status-val { font-weight: bold; color: #007bff; }
         #action-buttons { display: none; gap: 10px; margin-top: 20px; width: 100%; max-width: 500px; }
-        button { flex: 1; padding: 15px; font-size: 16px; font-weight: bold; border: none; border-radius: 8px; cursor: pointer; color: white; }
+        button { flex: 1; padding: 15px; font-size: 16px; font-weight: bold; border: none; border-radius: 8px; cursor: pointer; color: white; transition: opacity 0.2s; }
         .btn-einlagern { background-color: #28a745; }
         .btn-auslagern { background-color: #dc3545; }
-        .scan-lock { opacity: 0.5; pointer-events: none; }
+        
+        /* Sperr-Effekt während der Verarbeitung */
+        .scan-lock { opacity: 0.3; pointer-events: none; filter: grayscale(1); }
     </style>
 </head>
 <body>
@@ -32,12 +38,13 @@
     <h2>Filiale 77 Hansen</h2>
     <div id="reader"></div>
 
-    <div class="info-box">
+    <div class="info-box" id="main-interface">
         <div id="instruction">SCHRITT 1: Artikel scannen</div>
-        
+       
         <div class="data-row">
             <span class="data-label">Artikelnummer:</span>
             <input type="text" id="input-ware" placeholder="Scan oder Eingabe..." onchange="manualWareUpdate()">
+            <span id="val-artikel-name"></span>
         </div>
 
         <div class="data-row">
@@ -64,31 +71,43 @@
     <script>
         let ware = "";
         let lagerplatz = "";
-        let isScanning = false;
-        
-        // --- DEINE URL HIER EINTRAGEN ---
-        const webAppUrl = "https://script.google.com/macros/s/AKfycbyn9q7vWhWV7ANx1D_XzN-i5_6PyQLDmCPXWpJwkefPXbNevrwx1geYYASjlYij1KwYzQ/exec";
+        let isProcessing = false;
+       
+        const webAppUrl = "DEINE_WEB_APP_URL_HIER";
 
         const html5QrCode = new Html5Qrcode("reader");
         const config = { fps: 10, qrbox: { width: 250, height: 250 } };
 
-        function onScanSuccess(decodedText) {
-            if (isScanning) return;
-            isScanning = true;
-            document.body.classList.add('scan-lock');
+        function setLock(state) {
+            isProcessing = state;
+            if (state) {
+                document.getElementById('main-interface').classList.add('scan-lock');
+            } else {
+                document.getElementById('main-interface').classList.remove('scan-lock');
+            }
+        }
 
+        function onScanSuccess(decodedText) {
+            if (isProcessing) return;
+            
+            // Sofortige Sperre für 1.5 Sekunden gegen Doppel-Scans
+            setLock(true);
+            
             if (!ware) {
                 document.getElementById('input-ware').value = decodedText;
                 manualWareUpdate();
             } else {
+                // Validierung: Artikelnummer darf nicht gleich Platz sein
+                if (decodedText.trim().toLowerCase() === ware.toLowerCase()) {
+                    alert("FEHLER: Lagerplatz darf nicht identisch mit der Artikelnummer sein!");
+                    setLock(false);
+                    return;
+                }
                 document.getElementById('input-platz').value = decodedText;
                 manualPlatzUpdate();
             }
 
-            setTimeout(() => {
-                isScanning = false;
-                document.body.classList.remove('scan-lock');
-            }, 2000); // 2 Sekunden Pause
+            setTimeout(() => { if(ware && lagerplatz) {} else { setLock(false); } }, 1500);
         }
 
         async function manualWareUpdate() {
@@ -101,24 +120,35 @@
                 const data = await response.json();
                 document.getElementById('val-info-platz').innerText = data.platz;
                 document.getElementById('val-bestand').innerText = data.bestand;
+                document.getElementById('val-artikel-name').innerText = data.name; // Bezeichnung anzeigen
+                
                 document.getElementById('instruction').innerText = "SCHRITT 2: Lagerplatz scannen";
                 if(navigator.vibrate) navigator.vibrate(50);
             } catch (err) {
                 document.getElementById('val-info-platz').innerText = "Neu";
                 document.getElementById('val-bestand').innerText = "0";
+                document.getElementById('val-artikel-name').innerText = "Unbekannter Artikel";
             }
+            setLock(false);
         }
 
         async function manualPlatzUpdate() {
             lagerplatz = document.getElementById('input-platz').value.trim();
             if (!lagerplatz) return;
 
+            if (lagerplatz.toLowerCase() === ware.toLowerCase()) {
+                alert("FEHLER: Platznummer identisch mit Artikelnummer!");
+                document.getElementById('input-platz').value = "";
+                setLock(false);
+                return;
+            }
+
             try {
                 const response = await fetch(`${webAppUrl}?action=getPlatzInfo&platz=${encodeURIComponent(lagerplatz)}`);
                 const data = await response.json();
                 const listDiv = document.getElementById('liste-content');
                 listDiv.innerHTML = "";
-                
+               
                 if (data.artikel && data.artikel.length > 0) {
                     data.artikel.forEach(item => {
                         listDiv.innerHTML += `<div class="liste-item"><span>${item.name}</span><b>${item.menge} Stk.</b></div>`;
@@ -135,16 +165,23 @@
                 document.getElementById('instruction').innerText = "Bereit zum Buchen";
                 document.getElementById('instruction').style.color = "#28a745";
             }
+            setLock(false);
         }
 
         function sendToSheet(typ) {
+            setLock(true);
             const params = `?platz=${encodeURIComponent(lagerplatz)}&ware=${encodeURIComponent(ware)}&typ=${typ}`;
             document.getElementById('instruction').innerText = "Übertragung läuft...";
-            
+           
             fetch(webAppUrl + params, { mode: 'no-cors' })
                 .then(() => {
-                    alert(`${typ} erfolgreich in Filiale 77 Hansen gebucht!`);
+                    alert(`${typ} erfolgreich gebucht!`);
                     resetScanner();
+                    setLock(false);
+                })
+                .catch(() => {
+                    alert("Fehler bei der Verbindung");
+                    setLock(false);
                 });
         }
 
@@ -154,6 +191,7 @@
             document.getElementById('input-platz').value = "";
             document.getElementById('val-info-platz').innerText = "---";
             document.getElementById('val-bestand').innerText = "---";
+            document.getElementById('val-artikel-name').innerText = "";
             document.getElementById('platz-liste').style.display = "none";
             document.getElementById('instruction').innerText = "SCHRITT 1: Artikel scannen";
             document.getElementById('instruction').style.color = "#d63384";
